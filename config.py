@@ -5,7 +5,7 @@ Things you need to change: *_ROOT that indicate the path to each dataset
 """
 from os.path import join
 
-H36M_ROOT = ''
+H36M_ROOT = '/home/uyoung/human_pose_estimation/datasets/Human36M/extracted'
 LSP_ROOT = ''
 LSP_ORIGINAL_ROOT = ''
 LSPET_ROOT = ''
@@ -59,4 +59,5 @@ JOINT_REGRESSOR_H36M = 'data/J_regressor_h36m.npy'
 VERTEX_TEXTURE_FILE = 'data/vertex_texture.npy'
 STATIC_FITS_DIR = 'data/static_fits'
 SMPL_MEAN_PARAMS = 'data/smpl_mean_params.npz'
-SMPL_MODEL_DIR = 'data/smpl'
+#SMPL_MODEL_DIR = '/home/uyoung/human_pose_estimation/SMPL/datasets/SMPLX/models/'
+SMPL_MODEL_DIR = 'data/smplify_models/'

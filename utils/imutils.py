@@ -8,6 +8,8 @@ import cv2
 
 import constants
 
+from PIL import Image
+
 def get_transform(center, scale, res, rot=0):
     """Generate transformation matrix."""
     h = 200 * scale
@@ -76,7 +78,16 @@ def crop(img, center, scale, res, rot=0):
         new_img = scipy.misc.imrotate(new_img, rot)
         new_img = new_img[pad:-pad, pad:-pad]
 
-    new_img = scipy.misc.imresize(new_img, res)
+    #new_img = scipy.misc.imresize(new_img, res)
+    #new_img = np.array(Image.fromarray(new_img).resize(res))
+    if not isinstance(res, tuple):
+        res = tuple(res)
+    try:
+        new_img = cv2.resize(new_img, res)
+    except SystemError as e:
+        print(e)
+        print(f'res:{res}')
+        exit()
     return new_img
 
 def uncrop(img, center, scale, orig_shape, rot=0, is_rgb=True):

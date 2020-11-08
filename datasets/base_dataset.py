@@ -184,7 +184,8 @@ class BaseDataset(Dataset):
         imgname = join(self.img_dir, self.imgname[index])
         try:
             img = cv2.imread(imgname)[:,:,::-1].copy().astype(np.float32)
-        except TypeError:
+        except TypeError as e:
+            print(e)
             print(imgname)
         orig_shape = np.array(img.shape)[:2]
 

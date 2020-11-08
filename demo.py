@@ -119,8 +119,19 @@ if __name__ == '__main__':
     img, norm_img = process_image(args.img, args.bbox, args.openpose, input_res=constants.IMG_RES)
     with torch.no_grad():
         pred_rotmat, pred_betas, pred_camera = model(norm_img.to(device))
+
+
+        #print(f'pred_betas.shape:{pred_betas.shape}') # 1, 10
+        #print(f'pred_rotmat.shape:{pred_rotmat.shape}') # 1, 24, 3, 3
+        #print(f'global_orient.shape:{pred_rotmat[:,0].unsqueeze(1).shape}') # 1, 1, 3, 3
+
         pred_output = smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
         pred_vertices = pred_output.vertices
+
+        #print(f'pred_vertices.shape:{pred_vertices.shape}') # [1, 6890, 3]
+        #print(f'pred_output.joints.shape:{pred_output.joints.shape}') # [1, 49, 3]
+        
+        print(pred_output.joints[0])
         
     # Calculate camera parameters for rendering
     camera_translation = torch.stack([pred_camera[:,1], pred_camera[:,2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:,0] +1e-9)],dim=-1)
@@ -145,3 +156,10 @@ if __name__ == '__main__':
     # Save reconstructions
     cv2.imwrite(outfile + '_shape.png', 255 * img_shape[:,:,::-1])
     cv2.imwrite(outfile + '_shape_side.png', 255 * img_shape_side[:,:,::-1])
+
+    with open(outfile+'_shape.obj', 'w') as fp:
+        for v in pred_vertices:
+            fp.write('v %f %f %f\n' % (v[0], v[1], v[2]))
+
+        for f in smpl.faces:
+            fp.write('f %d %d %d\n' % (f[0], f[1], f[2]))
