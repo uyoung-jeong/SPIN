@@ -22,6 +22,7 @@ import json
 from collections import namedtuple
 from tqdm import tqdm
 import torchgeometry as tgm
+import kornia
 
 import config
 import constants
@@ -29,21 +30,25 @@ from models import hmr, SMPL
 from datasets import BaseDataset
 from utils.imutils import uncrop
 from utils.pose_utils import reconstruction_error
-from utils.part_utils import PartRenderer
+#from utils.part_utils import PartRenderer
 
+def get_args():
 # Define command-line arguments
-parser = argparse.ArgumentParser()
-parser.add_argument('--checkpoint', default=None, help='Path to network checkpoint')
-parser.add_argument('--dataset', default='h36m-p1', choices=['h36m-p1', 'h36m-p2', 'lsp', '3dpw', 'mpi-inf-3dhp'], help='Choose evaluation dataset')
-parser.add_argument('--log_freq', default=50, type=int, help='Frequency of printing intermediate results')
-parser.add_argument('--batch_size', default=32, help='Batch size for testing')
-parser.add_argument('--shuffle', default=False, action='store_true', help='Shuffle data')
-parser.add_argument('--num_workers', default=8, type=int, help='Number of processes for data loading')
-parser.add_argument('--result_file', default=None, help='If set, save detections to a .npz file')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--checkpoint', default=None, help='Path to network checkpoint')
+    parser.add_argument('--dataset', default='h36m-p1', choices=['h36m-p1', 'h36m-p2', 'lsp', '3dpw', 'mpi-inf-3dhp'], help='Choose evaluation dataset')
+    parser.add_argument('--log_freq', default=50, type=int, help='Frequency of printing intermediate results')
+    parser.add_argument('--batch_size', default=32, help='Batch size for testing')
+    parser.add_argument('--shuffle', default=False, action='store_true', help='Shuffle data')
+    parser.add_argument('--num_workers', default=8, type=int, help='Number of processes for data loading')
+    parser.add_argument('--result_file', default=None, help='If set, save detections to a .npz file')
+
+    return parser.parse_args()
 
 def run_evaluation(model, dataset_name, dataset, result_file,
                    batch_size=32, img_res=224, 
-                   num_workers=32, shuffle=False, log_freq=50):
+                   num_workers=32, shuffle=False, log_freq=50, 
+                   renderer=None, is_h36m_train=False):
     """Run evaluation on the datasets and metrics we report in the paper. """
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -61,7 +66,8 @@ def run_evaluation(model, dataset_name, dataset, result_file,
                        gender='female',
                        create_transl=False).to(device)
     
-    renderer = PartRenderer()
+    #renderer = PartRenderer() if renderer is None else renderer
+    renderer = renderer
     
     # Regressor for H36m joints
     J_regressor = torch.from_numpy(np.load(config.JOINT_REGRESSOR_H36M)).float()
@@ -130,14 +136,15 @@ def run_evaluation(model, dataset_name, dataset, result_file,
         curr_batch_size = images.shape[0]
         
         with torch.no_grad():
-            pred_rotmat, pred_betas, pred_camera = model(images)
+            pred_rotmat, pred_betas, pred_camera = model(batch['pose_3d'].to(device) if is_h36m_train else images)
             pred_output = smpl_neutral(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
             pred_vertices = pred_output.vertices
 
         if save_results:
             rot_pad = torch.tensor([0,0,1], dtype=torch.float32, device=device).view(1,3,1)
             rotmat = torch.cat((pred_rotmat.view(-1, 3, 3), rot_pad.expand(curr_batch_size * 24, -1, -1)), dim=-1)
-            pred_pose = tgm.rotation_matrix_to_angle_axis(rotmat).contiguous().view(-1, 72)
+            #pred_pose = tgm.rotation_matrix_to_angle_axis(rotmat).contiguous().view(-1, 72)
+            pred_pose = kornia.rotation_matrix_to_angle_axis(pred_rotmat.view(-1,3,3)).contiguous().view(-1, 72)
             smpl_pose[step * batch_size:step * batch_size + curr_batch_size, :] = pred_pose.cpu().numpy()
             smpl_betas[step * batch_size:step * batch_size + curr_batch_size, :]  = pred_betas.cpu().numpy()
             smpl_camera[step * batch_size:step * batch_size + curr_batch_size, :]  = pred_camera.cpu().numpy()
@@ -263,7 +270,7 @@ def run_evaluation(model, dataset_name, dataset, result_file,
         print()
 
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args = get_args()
     model = hmr(config.SMPL_MEAN_PARAMS)
     checkpoint = torch.load(args.checkpoint)
     model.load_state_dict(checkpoint['model'], strict=False)

@@ -4,8 +4,8 @@ import numpy as np
 from torchgeometry import angle_axis_to_rotation_matrix, rotation_matrix_to_angle_axis
 import cv2
 
-from datasets import MixedDataset, H36MDataset
-from models import hmr, SMPL
+from datasets import MixedDataset, H36MDataset, BaseDataset
+from models import hmr, hmr_p2a, SMPL
 from smplify import SMPLify
 from utils.geometry import batch_rodrigues, perspective_projection, estimate_translation
 from utils.renderer import Renderer
@@ -15,14 +15,16 @@ import config
 import constants
 from .fits_dict import FitsDict
 
-import ipdb
+from eval import run_evaluation
+import os
 
 class AngleTrainer(BaseTrainer):
     
     def init_fn(self):
         self.train_ds = H36MDataset(self.options, ignore_3d=self.options.ignore_3d, is_train=True)
+        self.test_ds = BaseDataset(None, self.test_args.dataset, is_train=False)
 
-        self.model = hmr(config.SMPL_MEAN_PARAMS, pretrained=True).to(self.device)
+        self.model = hmr_p2a(config.SMPL_MEAN_PARAMS, pretrained=True).to(self.device)
         self.optimizer = torch.optim.Adam(params=self.model.parameters(),
                                           lr=self.options.lr,
                                           weight_decay=0)
@@ -45,14 +47,17 @@ class AngleTrainer(BaseTrainer):
         if self.options.pretrained_checkpoint is not None:
             self.load_pretrained(checkpoint_file=self.options.pretrained_checkpoint)
 
+        """
         # Load dictionary of fits
         self.fits_dict = FitsDict(self.options, self.train_ds)
+        """
 
         # Create renderer
         self.renderer = Renderer(focal_length=self.focal_length, img_res=self.options.img_res, faces=self.smpl.faces)
 
     def finalize(self):
-        self.fits_dict.save()
+        #self.fits_dict.save()
+        pass
 
     def keypoint_loss(self, pred_keypoints_2d, gt_keypoints_2d, openpose_weight, gt_weight):
         """ Compute 2D reprojection loss on the keypoints.
@@ -109,8 +114,6 @@ class AngleTrainer(BaseTrainer):
     def train_step(self, input_batch):
         self.model.train()
 
-        ipdb.set_trace()
-
         # Get data from the batch
         images = input_batch['img'] # input image
         gt_keypoints_2d = input_batch['keypoints'] # 2D keypoints
@@ -131,6 +134,7 @@ class AngleTrainer(BaseTrainer):
         gt_model_joints = gt_out.joints
         gt_vertices = gt_out.vertices
 
+        """
         # Get current best fits from the dictionary
         opt_pose, opt_betas = self.fits_dict[(dataset_name, indices.cpu(), rot_angle.cpu(), is_flipped.cpu())]
         opt_pose = opt_pose.to(self.device)
@@ -138,7 +142,7 @@ class AngleTrainer(BaseTrainer):
         opt_output = self.smpl(betas=opt_betas, body_pose=opt_pose[:,3:], global_orient=opt_pose[:,:3])
         opt_vertices = opt_output.vertices
         opt_joints = opt_output.joints
-
+        """
 
         # De-normalize 2D keypoints from [-1,1] to pixel space
         gt_keypoints_2d_orig = gt_keypoints_2d.clone()
@@ -148,18 +152,18 @@ class AngleTrainer(BaseTrainer):
         # by minimizing a weighted least squares loss
         gt_cam_t = estimate_translation(gt_model_joints, gt_keypoints_2d_orig, focal_length=self.focal_length, img_size=self.options.img_res)
 
+        """
         opt_cam_t = estimate_translation(opt_joints, gt_keypoints_2d_orig, focal_length=self.focal_length, img_size=self.options.img_res)
 
 
         opt_joint_loss = self.smplify.get_fitting_loss(opt_pose, opt_betas, opt_cam_t,
                                                        0.5 * self.options.img_res * torch.ones(batch_size, 2, device=self.device),
                                                        gt_keypoints_2d_orig).mean(dim=-1)
+        """
 
         # Feed images in the network to predict camera and SMPL parameters
         #pred_rotmat, pred_betas, pred_camera = self.model(images)
         
-        ipdb.set_trace()
-
         pred_rotmat, pred_betas, pred_camera = self.model(gt_joints)
 
         pred_output = self.smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
@@ -183,14 +187,16 @@ class AngleTrainer(BaseTrainer):
         pred_keypoints_2d = pred_keypoints_2d / (self.options.img_res / 2.)
 
         if self.options.run_smplify:
-
             # Convert predicted rotation matrices to axis-angle
             pred_rotmat_hom = torch.cat([pred_rotmat.detach().view(-1, 3, 3).detach(), torch.tensor([0,0,1], dtype=torch.float32,
                 device=self.device).view(1, 3, 1).expand(batch_size * 24, -1, -1)], dim=-1)
+            """
             pred_pose = rotation_matrix_to_angle_axis(pred_rotmat_hom).contiguous().view(batch_size, -1)
             # tgm.rotation_matrix_to_angle_axis returns NaN for 0 rotation, so manually hack it
             pred_pose[torch.isnan(pred_pose)] = 0.0
+            """
 
+            """
             # Run SMPLify optimization starting from the network prediction
             new_opt_vertices, new_opt_joints,\
             new_opt_pose, new_opt_betas,\
@@ -211,13 +217,14 @@ class AngleTrainer(BaseTrainer):
             opt_pose[update, :] = new_opt_pose[update, :]
             opt_betas[update, :] = new_opt_betas[update, :]
             opt_cam_t[update, :] = new_opt_cam_t[update, :]
+            """
 
-
-            self.fits_dict[(dataset_name, indices.cpu(), rot_angle.cpu(), is_flipped.cpu(), update.cpu())] = (opt_pose.cpu(), opt_betas.cpu())
+            #self.fits_dict[(dataset_name, indices.cpu(), rot_angle.cpu(), is_flipped.cpu(), update.cpu())] = (opt_pose.cpu(), opt_betas.cpu())
 
         else:
             update = torch.zeros(batch_size, device=self.device).byte()
 
+        """
         # Replace extreme betas with zero betas
         opt_betas[(opt_betas.abs() > 3).any(dim=-1)] = 0.
 
@@ -245,6 +252,7 @@ class AngleTrainer(BaseTrainer):
 
         # Compute loss on SMPL parameters
         loss_regr_pose, loss_regr_betas = self.smpl_losses(pred_rotmat, pred_betas, opt_pose, opt_betas, valid_fit)
+        """
 
         # Compute 2D reprojection loss for the keypoints
         loss_keypoints = self.keypoint_loss(pred_keypoints_2d, gt_keypoints_2d,
@@ -253,7 +261,8 @@ class AngleTrainer(BaseTrainer):
 
         # Compute 3D keypoint loss
         loss_keypoints_3d = self.keypoint_3d_loss(pred_joints, gt_joints, has_pose_3d)
-
+    
+        """
         # Per-vertex loss for the shape
         loss_shape = self.shape_loss(pred_vertices, opt_vertices, valid_fit)
 
@@ -264,14 +273,17 @@ class AngleTrainer(BaseTrainer):
                self.options.keypoint_loss_weight * loss_keypoints_3d +\
                self.options.pose_loss_weight * loss_regr_pose + self.options.beta_loss_weight * loss_regr_betas +\
                ((torch.exp(-pred_camera[:,0]*10)) ** 2 ).mean()
+        """
+        
+        loss = self.options.keypoint_loss_weight * loss_keypoints_3d
         loss *= 60
-
 
         # Do backprop
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        """
         # Pack output arguments for tensorboard logging
         output = {'pred_vertices': pred_vertices.detach(),
                   'opt_vertices': opt_vertices,
@@ -283,6 +295,11 @@ class AngleTrainer(BaseTrainer):
                   'loss_regr_pose': loss_regr_pose.detach().item(),
                   'loss_regr_betas': loss_regr_betas.detach().item(),
                   'loss_shape': loss_shape.detach().item()}
+        """
+        output = {'pred_vertices': pred_vertices.detach(),
+                  'pred_cam_t': pred_cam_t.detach()}
+        losses = {'loss': loss.detach().item(),
+                  'loss_keypoints_3d': loss_keypoints_3d.detach().item()}
 
         return output, losses
 
@@ -292,12 +309,22 @@ class AngleTrainer(BaseTrainer):
         images = images + torch.tensor([0.485, 0.456, 0.406], device=images.device).reshape(1,3,1,1)
 
         pred_vertices = output['pred_vertices']
-        opt_vertices = output['opt_vertices']
+        #opt_vertices = output['opt_vertices']
         pred_cam_t = output['pred_cam_t']
-        opt_cam_t = output['opt_cam_t']
+        #opt_cam_t = output['opt_cam_t']
         images_pred = self.renderer.visualize_tb(pred_vertices, pred_cam_t, images)
-        images_opt = self.renderer.visualize_tb(opt_vertices, opt_cam_t, images)
+        #images_opt = self.renderer.visualize_tb(opt_vertices, opt_cam_t, images)
         self.summary_writer.add_image('pred_shape', images_pred, self.step_count)
-        self.summary_writer.add_image('opt_shape', images_opt, self.step_count)
+        #self.summary_writer.add_image('opt_shape', images_opt, self.step_count)
         for loss_name, val in losses.items():
             self.summary_writer.add_scalar(loss_name, val, self.step_count)
+
+    def test(self, epoch):
+        run_evaluation(self.model, 'h36m-p1', self.test_ds, 
+                       os.path.join(self.test_args.result_file, f'pred_{epoch}.npz'), 
+                       batch_size=self.test_args.batch_size,
+                       shuffle=False,
+                       log_freq = self.test_args.log_freq,
+                       renderer=self.renderer, is_h36m_train=True)
+
+

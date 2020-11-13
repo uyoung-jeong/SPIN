@@ -2,7 +2,7 @@
 
 import argparse
 import config as cfg
-from datasets.preprocess import h36m_extract, h36m_extract_custom
+from datasets.preprocess import h36m_extract, h36m_extract_custom, h36m_train_extract
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_files', default=False, action='store_true', help='Extract files needed for training')
@@ -16,7 +16,8 @@ if __name__ == '__main__':
     openpose_path = cfg.OPENPOSE_PATH
 
     if args.train_files:
-        pass
+        print('preprocess train files')
+        h36m_train_extract(cfg.H36M_ROOT, openpose_path, out_path, extract_img=True)
 
     if args.eval_files:
         print('preprocess eval files')

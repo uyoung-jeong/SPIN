@@ -25,7 +25,7 @@ class BaseDataset(Dataset):
         self.options = options
         self.img_dir = config.DATASET_FOLDERS[dataset]
         self.normalize_img = Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
-        self.data = np.load(config.DATASET_FILES[is_train][dataset])
+        self.data = np.load(config.DATASET_FILES[is_train][dataset], allow_pickle=True)
         self.imgname = self.data['imgname']
         
         # Get paths to gt masks, if available
@@ -76,6 +76,10 @@ class BaseDataset(Dataset):
             keypoints_openpose = self.data['openpose']
         except KeyError:
             keypoints_openpose = np.zeros((len(self.imgname), 25, 3))
+
+        if None in keypoints_openpose:
+            keypoints_openpose = np.zeros((len(self.imgname), 25, 3))
+
         self.keypoints = np.concatenate([keypoints_openpose, keypoints_gt], axis=1)
 
         # Get gender data, if available

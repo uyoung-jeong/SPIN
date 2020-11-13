@@ -8,9 +8,12 @@ import argparse
 from spacepy import pycdf
 from .read_openpose import read_openpose
 
+from tqdm import tqdm
+
 # Illustrative script for training data extraction
 # No SMPL parameters will be included in the .npz file.
 def h36m_train_extract(dataset_path, openpose_path, out_path, extract_img=False):
+    protocol = 1
 
     # convert joints to global order
     h36m_idx = [11, 6, 7, 8, 1, 2, 3, 12, 24, 14, 15, 17, 18, 19, 25, 26, 27]
@@ -22,15 +25,23 @@ def h36m_train_extract(dataset_path, openpose_path, out_path, extract_img=False)
     # users in validation set
     user_list = [1, 5, 6, 7, 8]
 
+    img_dir = 'images_train'
+
     # go over each user
-    for user_i in user_list:
+    for user_i in tqdm(user_list):
         user_name = 'S%d' % user_i
         # path with GT bounding boxes
-        bbox_path = os.path.join(dataset_path, user_name, 'MySegmentsMat', 'ground_truth_bb')
+        #bbox_path = os.path.join(dataset_path, user_name, 'MySegmentsMat', 'ground_truth_bb')
+        bbox_path = os.path.join(dataset_path, user_name, 'Segments_mat_gt_bb')
+        
         # path with GT 3D pose
-        pose_path = os.path.join(dataset_path, user_name, 'MyPoseFeatures', 'D3_Positions_mono')
+        #pose_path = os.path.join(dataset_path, user_name, 'MyPoseFeatures', 'D3_Positions_mono')
+        pose_path = os.path.join(dataset_path, user_name, 'Poses_D3_Positions_mono')
+        
         # path with GT 2D pose
-        pose2d_path = os.path.join(dataset_path, user_name, 'MyPoseFeatures', 'D2_Positions')
+        #pose2d_path = os.path.join(dataset_path, user_name, 'MyPoseFeatures', 'D2_Positions')
+        pose2d_path = os.path.join(dataset_path, user_name, 'Poses_D2_Positions')
+
         # path with videos
         vid_path = os.path.join(dataset_path, user_name, 'Videos')
 
@@ -61,8 +72,11 @@ def h36m_train_extract(dataset_path, openpose_path, out_path, extract_img=False)
             # video file
             if extract_img:
                 vid_file = os.path.join(vid_path, seq_name.replace('cdf', 'mp4'))
-                imgs_path = os.path.join(dataset_path, 'images')
+                imgs_path = os.path.join(dataset_path, img_dir)
                 vidcap = cv2.VideoCapture(vid_file)
+
+                if not os.path.exists(imgs_path):
+                    os.makedirs(imgs_path)
 
             # go over each frame of the sequence
             for frame_i in range(poses_3d.shape[0]):
@@ -89,9 +103,9 @@ def h36m_train_extract(dataset_path, openpose_path, out_path, extract_img=False)
                     center = [(bbox[2]+bbox[0])/2, (bbox[3]+bbox[1])/2]
                     scale = 0.9*max(bbox[2]-bbox[0], bbox[3]-bbox[1])/200.
 
-                    # read GT 3D pose
+                    # read GT 2D pose
                     partall = np.reshape(poses_2d[frame_i,:], [-1,2])
-                    part17 = partalll[h36m_idx]
+                    part17 = partall[h36m_idx]
                     part = np.zeros([24,3])
                     part[global_idx, :2] = part17
                     part[global_idx, 2] = 1
@@ -105,12 +119,14 @@ def h36m_train_extract(dataset_path, openpose_path, out_path, extract_img=False)
                     S24[global_idx, 3] = 1
                     
                     # read openpose detections
-                    json_file = os.path.join(openpose_path, 'coco',
-                        imgname.replace('.jpg', '_keypoints.json'))
-                    openpose = read_openpose(json_file, part, 'h36m')
+                    openpose = None
+                    if os.path.exists(openpose_path): # in h36m, we don't have available openpose data
+                        json_file = os.path.join(openpose_path, 'coco',
+                            imgname.replace('.jpg', '_keypoints.json'))
+                        openpose = read_openpose(json_file, part, 'h36m')
 
                     # store data
-                    imgnames_.append(os.path.join('images', imgname))
+                    imgnames_.append(os.path.join(img_dir, imgname))
                     centers_.append(center)
                     scales_.append(scale)
                     parts_.append(part)

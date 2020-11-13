@@ -1,6 +1,7 @@
 from __future__ import division
 import sys
 import time
+import os
 
 import torch
 from tqdm import tqdm
@@ -13,8 +14,10 @@ class BaseTrainer(object):
     """Base class for Trainer objects.
     Takes care of checkpointing/logging/resuming training.
     """
-    def __init__(self, options):
+    def __init__(self, options, test_args=None):
         self.options = options
+        self.test_args = test_args
+        self.test_args.result_file = os.path.join(options.log_dir)
         self.endtime = time.time() + self.options.time_to_run
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         # override this function to define your model, optimizers etc.
@@ -46,6 +49,9 @@ class BaseTrainer(object):
 
     def train(self):
         """Training process."""
+
+        
+
         # Run training for num_epochs epochs
         for epoch in tqdm(range(self.epoch_count, self.options.num_epochs), total=self.options.num_epochs, initial=self.epoch_count):
             # Create new DataLoader every epoch and (possibly) resume from an arbitrary step inside an epoch
@@ -60,8 +66,11 @@ class BaseTrainer(object):
                                               total=len(self.train_ds) // self.options.batch_size,
                                               initial=train_data_loader.checkpoint_batch_idx),
                                          train_data_loader.checkpoint_batch_idx):
+                if step > 5:
+                    break
                 if time.time() < self.endtime:
                     batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k,v in batch.items()}
+
                     out = self.train_step(batch)
                     self.step_count += 1
                     # Tensorboard logging every summary_steps steps
@@ -71,16 +80,24 @@ class BaseTrainer(object):
                     if self.step_count % self.options.checkpoint_steps == 0:
                         self.saver.save_checkpoint(self.models_dict, self.optimizers_dict, epoch, step+1, self.options.batch_size, train_data_loader.sampler.dataset_perm, self.step_count)
                         tqdm.write('Checkpoint saved')
-
+                    
+                    """
                     # Run validation every test_steps steps
                     if self.step_count % self.options.test_steps == 0:
                         self.test()
+                    """
                 else:
                     tqdm.write('Timeout reached')
                     self.finalize()
                     self.saver.save_checkpoint(self.models_dict, self.optimizers_dict, epoch, step, self.options.batch_size, train_data_loader.sampler.dataset_perm, self.step_count) 
                     tqdm.write('Checkpoint saved')
                     sys.exit(0)
+
+                if step % 10 == 0:
+                    print(f'loss:{out[1]["loss"]:.5f}')
+            
+            # evaluate
+            test_acc = self.test(epoch)
 
             # load a checkpoint only on startup, for the next epochs
             # just iterate over the dataset as usual

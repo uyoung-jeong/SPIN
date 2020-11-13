@@ -172,7 +172,8 @@ class HMR_P2A(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = nn.AvgPool2d(7, stride=1)
         """
-        self.fc1 = nn.Linear(512 * block.expansion + npose + 13, 1024)
+        #self.fc1 = nn.Linear(512 * block.expansion + npose + 13, 1024)
+        self.fc1 = nn.Linear(96 + npose + 13, 1024)
         self.drop1 = nn.Dropout()
         self.fc2 = nn.Linear(1024, 1024)
         self.drop2 = nn.Dropout()
@@ -243,6 +244,10 @@ class HMR_P2A(nn.Module):
         xf = self.avgpool(x4)
         """
         xf = x.view(x.size(0), -1)
+        #print(f'xf.shape:{xf.shape}') #64, 96
+        #print(f'pred_pose.shape:{init_pose.shape}') #64, 144
+        #print(f'pred_shape.shape:{init_shape.shape}') #64, 10
+        #print(f'pred_cam.shape:{init_cam.shape}') #64, 3
 
         pred_pose = init_pose
         pred_shape = init_shape
