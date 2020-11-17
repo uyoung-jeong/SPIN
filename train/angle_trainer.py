@@ -16,7 +16,12 @@ import constants
 from .fits_dict import FitsDict
 
 from eval import run_evaluation
+from utils.vis import draw_2d_pose
+from utils.multiview import project_3d_points_to_image_plane_without_distortion
+from utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
+
 import os
+from matplotlib import pyplot as plt
 
 class AngleTrainer(BaseTrainer):
     
@@ -111,7 +116,7 @@ class AngleTrainer(BaseTrainer):
             loss_regr_betas = torch.FloatTensor(1).fill_(0.).to(self.device)
         return loss_regr_pose, loss_regr_betas
 
-    def train_step(self, input_batch):
+    def train_step(self, input_batch, is_vis=False, epoch=-1):
         self.model.train()
 
         # Get data from the batch
@@ -301,7 +306,47 @@ class AngleTrainer(BaseTrainer):
         losses = {'loss': loss.detach().item(),
                   'loss_keypoints_3d': loss_keypoints_3d.detach().item()}
 
+        if is_vis:
+            n_joints = gt_joints.shape[1]
+            n_rows = 2
+            n_cols = 1
+            size = 5
+            
+            image_dir = os.path.join(self.options.log_dir, 'keypoints', f'{epoch:04}')
+            if not os.path.isdir():
+                os.makedirs(image_dir)
+
+            for batch_i in range(batch_size):
+                fig, axes = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(n_cols * size, n_rows * size))
+                axes = axes.reshape(n_rows, n_cols)
+                image_shape = images.shape[1:]
+
+                row_i = 0
+
+                # gt keypoints
+                axes[row_i, 0].set_ylabel('2D Keypoints (gt projected)', size='large')
+                axes[row_i][0].imshow(images[batch_i])
+                keypoints_2d_gt_proj = vis.project_3d_points_to_image_plane_without_distortion(proj_matrix, gt_joints)
+                draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][0], kind='smpl', no_connection=True)
+                row_i += 1
+
+                # pred keypoints
+                axes[row_i, 0].set_ylabel('2D Keypoints (pred projected)', size='large')
+                axes[row_i][0].imshow(images[batch_i])
+                keypoints_2d_pred_proj = vis.project_3d_points_to_image_plane_without_distortion(proj_matrix, pred_joints)
+                draw_2d_pose(keypoints_2d_pred_proj, axes[row_i][0], kind='smpl', no_connection=True)
+                row_i += 1
+
+                fig.tight_layout()
+                fig_image = fig_to_array(fig)
+                plt.close('all')
+
+                # save fig
+                cv2.imwrite(os.path.join(image_dir, f'{batch_i.png}'), cv2.cvtColor(fig_image, cv2.COLOR_BGR2RGB))
+
+
         return output, losses
+
 
     def train_summaries(self, input_batch, output, losses):
         images = input_batch['img']

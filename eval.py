@@ -126,7 +126,8 @@ def run_evaluation(model, dataset_name, dataset, result_file,
     joint_mapper_h36m = constants.H36M_TO_J17 if dataset_name == 'mpi-inf-3dhp' else constants.H36M_TO_J14
     joint_mapper_gt = constants.J24_TO_J17 if dataset_name == 'mpi-inf-3dhp' else constants.J24_TO_J14
     # Iterate over the entire dataset
-    for step, batch in enumerate(tqdm(data_loader, desc='Eval', total=len(data_loader))):
+    pbar = tqdm(data_loader, desc='Eval', total=len(data_loader)):
+    for step, batch in enumerate(pbar):
         # Get ground truth annotations from the batch
         gt_pose = batch['pose'].to(device)
         gt_betas = batch['betas'].to(device)
@@ -238,9 +239,10 @@ def run_evaluation(model, dataset_name, dataset, result_file,
         # Print intermediate results during evaluation
         if step % log_freq == log_freq - 1:
             if eval_pose:
-                print('MPJPE: ' + str(1000 * mpjpe[:step * batch_size].mean()))
-                print('Reconstruction Error: ' + str(1000 * recon_err[:step * batch_size].mean()))
-                print()
+                #print('MPJPE: ' + str(1000 * mpjpe[:step * batch_size].mean()))
+                pbar.set_description('mpjpe: {:.4f}'.format(1000 * mpjpe[:step * batch_size].mean()))
+                #print('Reconstruction Error: ' + str(1000 * recon_err[:step * batch_size].mean()))
+                #print()
             if eval_masks:
                 print('Accuracy: ', accuracy / pixel_count)
                 print('F1: ', f1.mean())

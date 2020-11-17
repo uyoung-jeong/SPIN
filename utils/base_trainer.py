@@ -49,11 +49,8 @@ class BaseTrainer(object):
 
     def train(self):
         """Training process."""
-
-        
-
         # Run training for num_epochs epochs
-        for epoch in tqdm(range(self.epoch_count, self.options.num_epochs), total=self.options.num_epochs, initial=self.epoch_count):
+        for epoch in range(self.epoch_count, self.options.num_epochs):
             # Create new DataLoader every epoch and (possibly) resume from an arbitrary step inside an epoch
             train_data_loader = CheckpointDataLoader(self.train_ds,checkpoint=self.checkpoint,
                                                      batch_size=self.options.batch_size,
@@ -62,16 +59,23 @@ class BaseTrainer(object):
                                                      shuffle=self.options.shuffle_train)
 
             # Iterate over all batches in an epoch
-            for step, batch in enumerate(tqdm(train_data_loader, desc='Epoch '+str(epoch),
+            pbar = tqdm(train_data_loader, desc='Epoch '+str(epoch),
                                               total=len(self.train_ds) // self.options.batch_size,
-                                              initial=train_data_loader.checkpoint_batch_idx),
-                                         train_data_loader.checkpoint_batch_idx):
+                                              initial=train_data_loader.checkpoint_batch_idx)
+            for step, batch in enumerate(pbar, train_data_loader.checkpoint_batch_idx):
+                """
                 if step > 5:
                     break
+                """
                 if time.time() < self.endtime:
                     batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k,v in batch.items()}
 
-                    out = self.train_step(batch)
+                    #out = self.train_step(batch, is_vis=True if step == 0 else False, epoch=epoch)
+                    out = self.train_step(batch, is_vis=False, epoch=epoch)
+
+                    if step % 10 == 0:
+                        pbar.set_description(f'epoch:{epoch}/{self.options.num_epochs}, ' +\
+                                    f'loss:{out[1]["loss"]:.4f}')
                     self.step_count += 1
                     # Tensorboard logging every summary_steps steps
                     if self.step_count % self.options.summary_steps == 0:
@@ -92,9 +96,6 @@ class BaseTrainer(object):
                     self.saver.save_checkpoint(self.models_dict, self.optimizers_dict, epoch, step, self.options.batch_size, train_data_loader.sampler.dataset_perm, self.step_count) 
                     tqdm.write('Checkpoint saved')
                     sys.exit(0)
-
-                if step % 10 == 0:
-                    print(f'loss:{out[1]["loss"]:.5f}')
             
             # evaluate
             test_acc = self.test(epoch)
