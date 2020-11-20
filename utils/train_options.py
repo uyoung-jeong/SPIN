@@ -49,6 +49,7 @@ class TrainOptions():
         train.add_argument('--smplify_threshold', type=float, default=100., help='Threshold for ignoring SMPLify fits during training') 
         train.add_argument('--num_smplify_iters', default=100, type=int, help='Number of SMPLify iterations') 
         
+        train.add_argument('--device', default=0, type=int, help='gpu index') 
         train.add_argument('--vis', default=0, type=int, help='1: visualize keypoints during training. 0:skip visualization') 
 
         shuffle_train = train.add_mutually_exclusive_group()

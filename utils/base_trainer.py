@@ -19,7 +19,8 @@ class BaseTrainer(object):
         self.test_args = test_args
         self.test_args.result_file = os.path.join(options.log_dir)
         self.endtime = time.time() + self.options.time_to_run
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device(options.device if torch.cuda.is_available() else 'cpu')
         # override this function to define your model, optimizers etc.
         self.init_fn()
         self.saver = CheckpointSaver(save_dir=options.checkpoint_dir)
@@ -69,9 +70,9 @@ class BaseTrainer(object):
                 """
                 if time.time() < self.endtime:
                     batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k,v in batch.items()}
-
-                    #out = self.train_step(batch, is_vis=True if step == 0 else False, epoch=epoch)
-                    out = self.train_step(batch, is_vis=False, epoch=epoch)
+                    
+                    is_vis = True if step == 0 and self.options.vis else False
+                    out = self.train_step(batch, is_vis=is_vis, epoch=epoch)
 
                     if step % 10 == 0:
                         pbar.set_description(f'epoch:{epoch}/{self.options.num_epochs}, ' +\

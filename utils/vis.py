@@ -335,7 +335,9 @@ def draw_2d_pose(keypoints, ax, kind='cmu', keypoints_mask=None, point_size=2, l
         keypoints numpy array of shape (19, 2): pose to draw in CMU format.
         ax: matplotlib axis to draw on
     """
-    connectivity = CONNECTIVITY_DICT[kind]
+    connectivity = None
+    if kind in CONNECTIVITY_DICT.keys():
+        connectivity = CONNECTIVITY_DICT[kind]
 
     color = 'blue' if color is None else color
 

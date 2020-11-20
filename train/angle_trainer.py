@@ -16,8 +16,9 @@ import constants
 from .fits_dict import FitsDict
 
 from eval import run_evaluation
-from utils.vis import draw_2d_pose
-from utils.multiview import project_3d_points_to_image_plane_without_distortion
+from utils.imutils import transform
+from utils.vis import draw_2d_pose, fig_to_array
+from utils.multiview import project_3d_points_to_image_plane_without_distortion, Camera
 from utils.img import image_batch_to_numpy, to_numpy, denormalize_image, resize_image
 
 import os
@@ -28,6 +29,9 @@ class AngleTrainer(BaseTrainer):
     def init_fn(self):
         self.train_ds = H36MDataset(self.options, ignore_3d=self.options.ignore_3d, is_train=True)
         self.test_ds = BaseDataset(None, self.test_args.dataset, is_train=False)
+
+        # cam params from human 3.6m
+        self.cams = np.load(os.path.join(config.DATASET_NPZ_PATH, 'h36m_cameras.npy'), allow_pickle=True).item()
 
         self.model = hmr_p2a(config.SMPL_MEAN_PARAMS, pretrained=True).to(self.device)
         self.optimizer = torch.optim.Adam(params=self.model.parameters(),
@@ -121,6 +125,7 @@ class AngleTrainer(BaseTrainer):
 
         # Get data from the batch
         images = input_batch['img'] # input image
+        imgnames = input_batch['imgname'] # image filename
         gt_keypoints_2d = input_batch['keypoints'] # 2D keypoints
         gt_pose = input_batch['pose'] # SMPL pose parameters
         gt_betas = input_batch['betas'] # SMPL beta parameters
@@ -313,27 +318,65 @@ class AngleTrainer(BaseTrainer):
             size = 5
             
             image_dir = os.path.join(self.options.log_dir, 'keypoints', f'{epoch:04}')
-            if not os.path.isdir():
+            if not os.path.isdir(image_dir):
                 os.makedirs(image_dir)
 
             for batch_i in range(batch_size):
                 fig, axes = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(n_cols * size, n_rows * size))
                 axes = axes.reshape(n_rows, n_cols)
-                image_shape = images.shape[1:]
+                image_shape = images.shape[2:]
 
                 row_i = 0
 
+                img_fname = imgnames[batch_i].replace(config.H36M_ROOT, '')
+                img_fname = img_fname.replace('/images_train/', '').replace('/images/', '')
+                subject = img_fname[:3].replace('_', '')
+                cam_name= img_fname[4:-11].split('.')[-1]
+                
+                match_arr = np.array([subject==v for v in self.cams['subject_names']])
+                subject_idx = np.argmax(match_arr)
+
+                match_res = np.array([cam_name == v for v in self.cams['camera_names']])
+                cam_idx = np.argmax(match_res) 
+
+                # load proj_matrix
+                shot_camera = self.cams['cameras'][subject_idx, cam_idx]
+                retval_camera = Camera(shot_camera['R'], shot_camera['t'], shot_camera['K'], shot_camera['dist'], cam_name)
+                
+                ul = np.array(transform([1,1], input_batch['center'][batch_i], input_batch['scale'][batch_i], [224,224], invert=1))-1
+                br = np.array(transform([225, 225], input_batch['center'][batch_i], input_batch['scale'][batch_i], [224, 224], invert=1))-1
+                bbox = (ul[0], ul[1], br[0], br[1]) # left, up, right, low
+                #retval_camera.update_after_crop(bbox)
+                #retval_camera.update_after_resize((1000,1000), image_shape)
+                #retval_camera.update_after_crop(bbox)
+
+                proj_matrix = torch.tensor(retval_camera.projection)
+
+                vis_img = cv2.imread(imgnames[batch_i])
+                vis_rot = input_batch['rot_angle'][batch_i].detach().cpu()
+
                 # gt keypoints
                 axes[row_i, 0].set_ylabel('2D Keypoints (gt projected)', size='large')
-                axes[row_i][0].imshow(images[batch_i])
-                keypoints_2d_gt_proj = vis.project_3d_points_to_image_plane_without_distortion(proj_matrix, gt_joints)
+                axes[row_i][0].imshow(vis_img)
+                gt_joint_vis = gt_joints[batch_i].detach().cpu()
+
+                #gt_joint_vis = torch.tensor(self.test_ds.j3d_processing(gt_joint_vis.numpy(), -vis_rot, 0))
+                gt_joint_vis = gt_joint_vis[:,:3]
+                gt_joint_vis = (gt_joint_vis + gt_joint_vis[6])* 1000
+                keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matrix, gt_joint_vis)
                 draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][0], kind='smpl', no_connection=True)
                 row_i += 1
 
                 # pred keypoints
                 axes[row_i, 0].set_ylabel('2D Keypoints (pred projected)', size='large')
-                axes[row_i][0].imshow(images[batch_i])
-                keypoints_2d_pred_proj = vis.project_3d_points_to_image_plane_without_distortion(proj_matrix, pred_joints)
+                axes[row_i][0].imshow(vis_img)
+                pred_joint_vis = pred_joints[batch_i, 25:].detach().cpu()
+                #tmp_ones = np.ones(pred_joint_vis.shape[0]).reshape(-1, 1)
+                #pred_joint_vis = np.concatenate((pred_joint_vis.numpy(), tmp_ones), axis=1)
+                #pred_joint_vis = self.test_ds.j3d_processing(pred_joint_vis, -vis_rot, 0)
+                #pred_joint_vis = torch.tensor(pred_joint_vis[:, :3])
+                pred_Joint_vis = (pred_joint_vis + pred_joint_vis[6])* 1000
+                keypoints_2d_pred_proj = project_3d_points_to_image_plane_without_distortion(proj_matrix, pred_joint_vis)
                 draw_2d_pose(keypoints_2d_pred_proj, axes[row_i][0], kind='smpl', no_connection=True)
                 row_i += 1
 
@@ -342,7 +385,8 @@ class AngleTrainer(BaseTrainer):
                 plt.close('all')
 
                 # save fig
-                cv2.imwrite(os.path.join(image_dir, f'{batch_i.png}'), cv2.cvtColor(fig_image, cv2.COLOR_BGR2RGB))
+                #cv2.imwrite(os.path.join(image_dir, f'{batch_i:04}.png'), cv2.cvtColor(fig_image, cv2.COLOR_BGR2RGB))
+                cv2.imwrite(os.path.join(image_dir, f'{batch_i:04}.png'), fig_image)
 
 
         return output, losses
@@ -370,6 +414,6 @@ class AngleTrainer(BaseTrainer):
                        batch_size=self.test_args.batch_size,
                        shuffle=False,
                        log_freq = self.test_args.log_freq,
-                       renderer=self.renderer, is_h36m_train=True)
+                       renderer=self.renderer, is_h36m_train=True, device = self.device)
 
 

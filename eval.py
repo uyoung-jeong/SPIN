@@ -48,10 +48,10 @@ def get_args():
 def run_evaluation(model, dataset_name, dataset, result_file,
                    batch_size=32, img_res=224, 
                    num_workers=32, shuffle=False, log_freq=50, 
-                   renderer=None, is_h36m_train=False):
+                   renderer=None, is_h36m_train=False, device=None):
     """Run evaluation on the datasets and metrics we report in the paper. """
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device(device if (device is not None and torch.cuda.is_available()) else torch.device('cpu'))
 
     # Transfer model to the GPU
     model.to(device)
@@ -126,7 +126,7 @@ def run_evaluation(model, dataset_name, dataset, result_file,
     joint_mapper_h36m = constants.H36M_TO_J17 if dataset_name == 'mpi-inf-3dhp' else constants.H36M_TO_J14
     joint_mapper_gt = constants.J24_TO_J17 if dataset_name == 'mpi-inf-3dhp' else constants.J24_TO_J14
     # Iterate over the entire dataset
-    pbar = tqdm(data_loader, desc='Eval', total=len(data_loader)):
+    pbar = tqdm(data_loader, desc='Eval', total=len(data_loader))
     for step, batch in enumerate(pbar):
         # Get ground truth annotations from the batch
         gt_pose = batch['pose'].to(device)
@@ -156,7 +156,7 @@ def run_evaluation(model, dataset_name, dataset, result_file,
             J_regressor_batch = J_regressor[None, :].expand(pred_vertices.shape[0], -1, -1).to(device)
             # Get 14 ground truth joints
             if 'h36m' in dataset_name or 'mpi-inf' in dataset_name:
-                gt_keypoints_3d = batch['pose_3d'].cuda()
+                gt_keypoints_3d = batch['pose_3d'].to(device)
                 gt_keypoints_3d = gt_keypoints_3d[:, joint_mapper_gt, :-1]
             # For 3DPW get the 14 common joints from the rendered shape
             else:
@@ -257,7 +257,6 @@ def run_evaluation(model, dataset_name, dataset, result_file,
         np.savez(result_file, pred_joints=pred_joints, pose=smpl_pose, betas=smpl_betas, camera=smpl_camera)
     # Print final results during evaluation
     print('*** Final Results ***')
-    print()
     if eval_pose:
         print('MPJPE: ' + str(1000 * mpjpe.mean()))
         print('Reconstruction Error: ' + str(1000 * recon_err.mean()))
